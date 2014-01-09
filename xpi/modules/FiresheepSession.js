@@ -39,6 +39,23 @@ function FiresheepSession (fs) {
   });
 }
 
+function parseCookies(str) {
+    var cookies = {};
+    if (str) {
+        str.split("; ").forEach(function (pair) {
+                                var index = pair.indexOf("=");
+                                if (index > 0) {
+                                var name  = pair.substring(0, index);
+                                var value = pair.substr(index+1);
+                                if (name.length && value.length)
+                                cookies[name] = value;
+                                }
+                                });
+    }
+    return cookies;
+}
+
+
 FiresheepSession.prototype = {
   start: function () {
     try {
@@ -125,7 +142,7 @@ FiresheepSession.prototype = {
       var self = this;
       var tailListener = {
         onData: function (data) {
-          dump('Got line: ' + data + '\n');
+//          dump('Got line: ' + data + '\n');
           self._processPacket(JSON.parse(data));
         },
         onError: function (error) {
@@ -214,17 +231,24 @@ FiresheepSession.prototype = {
       host = host.slice(0, host.indexOf(':'));
     
     packet.cookieString = packet.cookies;
-    packet.cookies = Utils.parseCookies(packet.cookieString);
+    packet.cookies = parseCookies(packet.cookieString);
 
     packet.queryString = packet.query;
     packet.query = Utils.parseQuery(packet.queryString);
-            
-    if (packet.cookies[this._core.canaryText]) { // FIXME: Needs more testing.
-      dump('\n\n\n\nIGNORE!!!\n\n\n\n');
-      return;
+    
+    if ('__utma' in packet.cookies) {
+      dump('found utma!\n');
+      dump(packet.cookies['__utma']);
+        dump('\n');
     }
+
+      if ('id' in packet.cookies) {
+          dump('found id!\n');
+          dump(packet.cookies['id']);
+          dump('\n');
+      }
       
-    var handlers = this._handlers;
+      var handlers = this._handlers;
         
     var handler = handlers.domains[host];
     if (!handler) {
@@ -257,69 +281,12 @@ FiresheepSession.prototype = {
       handler: handler
     });
     
-    // Default session handling
-    if (handler && handler.sessionCookieNames) {
-      var theSession = {};      
-      var foundAll = _.all(handler.sessionCookieNames, function (cookieName) {
-        var cookieValue = packet.cookies[cookieName];
-        if (cookieValue) {
-          theSession[cookieName] = cookieValue;
-          return true;
-        } else {
-          return false;
-        }
-      });
-      
-      if (foundAll) {
-        result.sessionId = theSession;
-      } else {
-        // If sessionCookieNames was specified but all cookies weren't found,
-        // ignore packet.
-        return;
-      }
-    }
-    
-    // Custom packet processing
-    if (handler && typeof(handler.processPacket) == 'function') {
-      try {
-        handler.processPacket.apply(result, [ packet ]);
-      } catch (e) {           
-        var errorText = 'Error in ' + handler.name + ' processPacket(): ' + e;
-        this._notify('error', { error: errorText });
-        return;
-      }
-    }
 
     // If no session after processPacket(), ignore packet.
-    if (!result.sessionId) {
-      return;
-    }
+//    if (!result.sessionId) {
+//      return;
+//    }
     
-    // Ignore packet if session has been seen before.
-    if (this._hasSeenResult(result)) {
-      return;
-    }
-        
-    // Figure out user identity.
-    if (handler && typeof(handler.identifyUser) == 'function') {
-      try {
-        handler.identifyUser.apply(result);
-      } catch (e) {
-        result.error = e;
-      }
-    }
-    
-    // Check again if packet has been seen, identifyUser() could
-    // have changed sessionId.
-    if (this._hasSeenResult(result)) {
-      return;
-    }
-    
-    // Cache information about this result for lookup later.
-    this._resultCache[Utils.makeCacheKey(result)] = true;
-    this._results.push(result);
-
-    this._notify('result_added', { result: result });
   },
 
   _notify: function (action, opts) {
